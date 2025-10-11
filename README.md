@@ -3,6 +3,11 @@
 
 # PayPal OAuth2 Token Request
 
+Step 1: Get access_token from (POST /v1/oauth2/token)
+Step 2: Use access_token to authorize (POST /v2/checkout/orders), this will respond with id: 5PA06018TW008943K for the order
+Step 3: You can check the status (GET /v2/checkout/orders/{id}) by passing the id received in Step 2
+Step 4: Captures payment for an order. (POST /v2/checkout/orders/{id}/capture) To successfully capture payment for an order, the buyer must first approve the order or a valid payment_source must be provided in the request. 
+
 ## cURL Command
 
 ```bash
