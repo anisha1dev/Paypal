@@ -57,7 +57,6 @@ POST /v2/checkout/orders/{id}/capture
 - [Create Order](https://developer.paypal.com/docs/api/orders/v2/#orders_create)  
 - [Get Order](https://developer.paypal.com/docs/api/orders/v2/#orders_get)  
 - [Capture Order](https://developer.paypal.com/docs/api/orders/v2/#orders_capture)
-```
 
 ## cURL Command
 
