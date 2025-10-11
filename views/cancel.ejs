@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Cancelled</title>
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .cancel-container { text-align:center; padding:50px; }
+    .crossmark { font-size:80px; color:#dc3545; animation:pop 0.5s ease-out; }
+    @keyframes pop { 0% {transform:scale(0);} 80% {transform:scale(1.2);} 100% {transform:scale(1);} }
+    .details { margin-top:20px; font-size:1.1rem; color:#333; }
+    .home-btn { margin-top:30px; display:inline-block; padding:10px 20px; background-color:#0070ba; color:white; border-radius:5px; text-decoration:none; transition:0.2s; }
+    .home-btn:hover { background-color:#005ea6; }
+  </style>
+</head>
+<body>
+  <div class="cancel-container">
+    <div class="crossmark">❌</div>
+    <h1>Payment Cancelled</h1>
+
+    <% if (productName) { %>
+      <p class="details">You cancelled your purchase of: <strong><%= productName %></strong></p>
+    <% } else { %>
+      <p class="details">Your payment has been cancelled successfully.</p>
+    <% } %>
+
+    <a href="/" class="home-btn">Back to Home</a>
+  </div>
+</body>
+</html>

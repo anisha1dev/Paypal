@@ -1,0 +1,23 @@
+[
+  {
+    "id": "001",
+    "name": "Node History",
+    "price": "25.00",
+    "currency": "USD",
+    "description": "A great history about Node.js"
+  },
+  {
+    "id": "002",
+    "name": "Online Course",
+    "price": "50.00",
+    "currency": "USD",
+    "description": "Full-stack JavaScript course"
+  },
+  {
+    "id": "003",
+    "name": "Conference Ticket",
+    "price": "100.00",
+    "currency": "USD",
+    "description": "Entry to JSConf event"
+  }
+]

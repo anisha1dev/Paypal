@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PayPal Node App</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <h1>Available Events</h1>
+
+  <div class="container">
+    <% products.forEach(product => { %>
+      <div class="product">
+        <h2><%= product.name %></h2>
+        <p><%= product.description %></p>
+        <p><strong>Price: $<%= product.price %></strong></p>
+        <form action="/pay" method="post">
+          <input type="hidden" name="productId" value="<%= product.id %>">
+          <input type="submit" value="Book Now">
+        </form>
+      </div>
+    <% }) %>
+  </div>
+
+</body>
+</html>
