@@ -1,6 +1,5 @@
 ![PayPal Order Flow](https://www.paypalobjects.com/ppdevdocs/orders-api/orders-api-standard-flow.png)
 ---
-# PayPal OAuth2 Token Request
 
 ## Step 1: Get `access_token`
 Request an OAuth2 token using:
@@ -57,7 +56,7 @@ POST /v2/checkout/orders/{id}/capture
 - [Create Order](https://developer.paypal.com/docs/api/orders/v2/#orders_create)  
 - [Get Order](https://developer.paypal.com/docs/api/orders/v2/#orders_get)  
 - [Capture Order](https://developer.paypal.com/docs/api/orders/v2/#orders_capture)
-
+# PayPal OAuth2 Token Request
 ## cURL Command
 
 ```bash
