@@ -1,12 +1,63 @@
 ![PayPal Order Flow](https://www.paypalobjects.com/ppdevdocs/orders-api/orders-api-standard-flow.png)
 ---
-
 # PayPal OAuth2 Token Request
 
-Step 1: Get access_token from (POST /v1/oauth2/token)
-Step 2: Use access_token to authorize (POST /v2/checkout/orders), this will respond with id: 5PA06018TW008943K for the order
-Step 3: You can check the status (GET /v2/checkout/orders/{id}) by passing the id received in Step 2
-Step 4: Captures payment for an order. (POST /v2/checkout/orders/{id}/capture) To successfully capture payment for an order, the buyer must first approve the order or a valid payment_source must be provided in the request. 
+## Step 1: Get `access_token`
+Request an OAuth2 token using:
+
+```
+
+POST /v1/oauth2/token
+
+```
+
+This `access_token` will be used to authorize subsequent API calls.
+
+## Step 2: Create an Order
+Use the `access_token` to create an order:
+
+```
+
+POST /v2/checkout/orders
+
+```
+
+Example response includes an order ID:
+
+```
+
+id: 5PA06018TW008943K
+
+```
+
+## Step 3: Check Order Status
+Check the status of an order by passing the ID received in Step 2:
+
+```
+
+GET /v2/checkout/orders/{id}
+
+```
+
+Replace `{id}` with the order ID.
+
+## Step 4: Capture Payment
+Capture payment for an order:
+
+```
+
+POST /v2/checkout/orders/{id}/capture
+
+```
+
+> **Note:** To successfully capture payment, the buyer must first approve the order or a valid `payment_source` must be provided in the request.
+
+## References
+- [Get Access Token](https://developer.paypal.com/api/rest/#link-getaccesstoken)  
+- [Create Order](https://developer.paypal.com/docs/api/orders/v2/#orders_create)  
+- [Get Order](https://developer.paypal.com/docs/api/orders/v2/#orders_get)  
+- [Capture Order](https://developer.paypal.com/docs/api/orders/v2/#orders_capture)
+```
 
 ## cURL Command
 
