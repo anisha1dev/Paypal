@@ -93,7 +93,7 @@ POST /v2/checkout/orders/{id}/capture
 ### Request Headers
 
 * `Authorization: Bearer <ACCESS_TOKEN>`
-* `PayPal-Request-Id`: optional idempotency key
+* `PayPal-Request-Id`: Idempotency key
 * `Prefer`: optional, default `return=minimal`
 
 ### Request Body (minimal)
