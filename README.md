@@ -2,55 +2,44 @@
 ---
 # PayPal OAuth2 Token Request
 
-## Step 1: Get `access_token`
-Request an OAuth2 token using:
+### **1️⃣ Creator OAuth Login Flow**
 
-```
+1. **Login Page** – Creator visits `/creator/login`.
+2. **Redirect to PayPal** – `startOAuth` sends them to PayPal OAuth consent page.
+3. **PayPal Callback** – After approval, PayPal redirects to `/creator/callback` with `code`.
+4. **Exchange Code** – Server exchanges `code` for `access_token` & `refresh_token`.
+5. **Fetch Creator Info** – Use `access_token` to fetch creator's PayPal `payer_id` and email.
+6. **Save/Update Creator** – Store tokens and info in DB (`Creator` model). Set `req.session.creatorId`.
+7. **Redirect to Event Creation** – `/creator/create-event`.
 
-POST /v1/oauth2/token
+---
 
-```
+### **2️⃣ Event Management**
 
-This `access_token` will be used to authorize subsequent API calls.
+1. **Render Create Event Page** – Only logged-in creators can access.
+2. **Create Event** – Save event info (`name`, `description`, `price`, `currency`, creator ID) to DB (`Event` model).
+3. **List Events** – Public page showing all events.
 
-## Step 2: Create an Order
-Use the `access_token` to create an order:
+---
 
-```
+### **3️⃣ Event Payment Flow (Customer)**
 
-POST /v2/checkout/orders
+1. **Pay for Event** – Customer clicks “Pay” on an event → triggers `payEvent`.
+2. **Create PayPal Order** – Server calls PayPal `OrdersCreateRequest` with event price & creator as payee.
+3. **Redirect to PayPal** – Customer approves payment on PayPal site.
+4. **Capture Payment** – After approval, PayPal redirects to `/capture?eventId=...`.
+5. **Finalize Order** – Server captures the payment (`OrdersCaptureRequest`) and shows success page with payment details.
 
-```
+---
 
-Example response includes an order ID:
+💡 **Key Points**
 
-```
+* **Creators** authenticate via PayPal OAuth to get `payer_id` & tokens.
+* **Events** are linked to creators and can be paid for by customers via PayPal.
+* **PayPal SDK** is used for creating and capturing orders.
+* **Sessions** are used to track logged-in creators.
 
-id: 5PA06018TW008943K
-
-```
-
-## Step 3: Check Order Status
-Check the status of an order by passing the ID received in Step 2:
-
-```
-
-GET /v2/checkout/orders/{id}
-
-```
-
-Replace `{id}` with the order ID.
-
-## Step 4: Capture Payment
-Capture payment for an order:
-
-```
-
-POST /v2/checkout/orders/{id}/capture
-
-```
-
-> **Note:** To successfully capture payment, the buyer must first approve the order or a valid `payment_source` must be provided in the request.
+---
 
 ## References
 - [Get Access Token](https://developer.paypal.com/api/rest/#link-getaccesstoken)  
@@ -128,6 +117,9 @@ Optional headers:
       "amount": {
         "currency_code": "USD",
         "value": "100.00"
+      },
+      "payee": {
+          "email_address": event.creator.email
       }
     }
   ],
