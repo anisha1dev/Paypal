@@ -1,5 +1,6 @@
 ![PayPal Order Flow](https://www.paypalobjects.com/ppdevdocs/orders-api/orders-api-standard-flow.png)
 ---
+NOTE: Set the 'Return URL' in your application > Log in with PayPal (Advanced settings)
 
 ### **1️⃣ Creator OAuth Login Flow**
 
