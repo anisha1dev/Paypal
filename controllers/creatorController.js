@@ -2,18 +2,6 @@
 const Creator = require('../models/Creator');
 const { Client, Environment } = require('@paypal/paypal-server-sdk');
 
-// Initialize app-level SDK client (optional, e.g., for fetching app-level info)
-const appClient = new Client({
-  clientCredentialsAuthCredentials: {
-    oAuthClientId: process.env.PAYPAL_APP_CLIENT_ID,
-    oAuthClientSecret: process.env.PAYPAL_APP_SECRET,
-    oAuthOnTokenUpdate: (token) => {
-      console.log('App-level token updated:', token.accessToken);
-    }
-  },
-  environment: Environment.Sandbox
-});
-
 // Render login page
 exports.renderLogin = (req, res) => {
   res.render('login');
@@ -97,20 +85,4 @@ exports.creatorCallback = async (req, res) => {
     console.error(err);
     res.send('Error during PayPal OAuth');
   }
-};
-
-
-// Example: Using SDK with user access token
-exports.createPayPalOrder = async (creatorAccessToken, orderData) => {
-  const client = new Client({
-    clientCredentialsAuthCredentials: { oAuthToken: creatorAccessToken },
-    environment: Environment.Sandbox
-  });
-
-  const request = new OrdersCreateRequest();
-  request.prefer('return=representation');
-  request.requestBody(orderData);
-
-  const order = await client.execute(request);
-  return order;
 };

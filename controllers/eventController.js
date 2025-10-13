@@ -1,9 +1,10 @@
 // controllers/eventController.js
 const Event = require('../models/Event');
-const Creator = require('../models/Creator');
 const paypal = require('@paypal/checkout-server-sdk');
 
+// ---------------------
 // Helper: create PayPal client
+// ---------------------
 function payPalClient() {
   const environment = new paypal.core.SandboxEnvironment(
     process.env.PAYPAL_APP_CLIENT_ID,
@@ -12,13 +13,17 @@ function payPalClient() {
   return new paypal.core.PayPalHttpClient(environment);
 }
 
+// ---------------------
 // Render create-event page
+// ---------------------
 exports.renderCreateEvent = (req, res) => {
   if (!req.session.creatorId) return res.redirect('/creator/login');
   res.render('create-event');
 };
 
+// ---------------------
 // Create new event
+// ---------------------
 exports.createEvent = async (req, res) => {
   try {
     const { name, description, price, currency } = req.body;
@@ -32,7 +37,9 @@ exports.createEvent = async (req, res) => {
   }
 };
 
+// ---------------------
 // List all events
+// ---------------------
 exports.listEvents = async (req, res) => {
   try {
     const events = await Event.find().populate('creator');
@@ -43,7 +50,9 @@ exports.listEvents = async (req, res) => {
   }
 };
 
-// Create PayPal order for an event
+// ---------------------
+// Create PayPal order (authorize intent)
+// ---------------------
 exports.payEvent = async (req, res) => {
   try {
     const eventId = req.body.eventId;
@@ -55,25 +64,30 @@ exports.payEvent = async (req, res) => {
     const request = new paypal.orders.OrdersCreateRequest();
     request.prefer('return=representation');
     request.requestBody({
-      intent: 'CAPTURE',
-      purchase_units: [{
-        amount: {
-          currency_code: event.currency,
-          value: event.price.toString()
+      intent: 'AUTHORIZE', // ✅ authorize first
+      purchase_units: [
+        {
+          amount: {
+            currency_code: event.currency,
+            value: event.price.toString(),
+          },
+          payee: {
+            email_address: event.creator.email,
+          },
+          description: event.description,
         },
-        payee: {
-          email_address: event.creator.email
-        },
-        description: event.description
-      }],
+      ],
       application_context: {
-        return_url: `${req.protocol}://${req.get('host')}/capture?eventId=${event._id}`,
-        cancel_url: `${req.protocol}://${req.get('host')}/events`
-      }
+        brand_name: 'Event Ticketing',
+        landing_page: 'LOGIN',
+        user_action: 'PAY_NOW',
+        return_url: `${req.protocol}://${req.get('host')}/authorize?eventId=${event._id}`,
+        cancel_url: `${req.protocol}://${req.get('host')}/events`,
+      },
     });
 
     const order = await client.execute(request);
-    const approveLink = order.result.links.find(l => l.rel === 'approve').href;
+    const approveLink = order.result.links.find((l) => l.rel === 'approve').href;
     res.redirect(approveLink);
 
   } catch (err) {
@@ -82,30 +96,73 @@ exports.payEvent = async (req, res) => {
   }
 };
 
-// Capture PayPal order after buyer approval
-exports.captureOrder = async (req, res) => {
+// ---------------------
+// Authorize + Auto-Capture Payment
+// ---------------------
+exports.authorizeOrder = async (req, res) => {
   try {
     const { token, eventId } = req.query;
     const event = await Event.findById(eventId).populate('creator');
-
     const client = payPalClient();
-    const request = new paypal.orders.OrdersCaptureRequest(token);
-    request.requestBody({});
-    const capture = await client.execute(request);
 
-    // Extract details for success page
-    const payerName = capture.result.payer.name.given_name || 'Customer';
-    const payerEmail = capture.result.payer.email_address || 'Not provided';
+    // Step 1: Authorize
+    const authorizeRequest = new paypal.orders.OrdersAuthorizeRequest(token);
+    authorizeRequest.requestBody({});
+    const authorization = await client.execute(authorizeRequest);
+
+    const authorizationId =
+      authorization.result.purchase_units[0].payments.authorizations[0].id;
+
+    console.log('Authorization ID:', authorizationId);
+
+    // Step 2: Auto-capture
+    const captureRequest = new paypal.payments.AuthorizationsCaptureRequest(authorizationId);
+    captureRequest.requestBody({});
+    const capture = await client.execute(captureRequest);
+
+    console.log('Payment captured:', capture.result);
+
+    // Step 3: Safe extraction
+    const payerName =
+      authorization.result.payer?.name?.given_name || 'Customer';
+    const payerEmail =
+      authorization.result.payer?.email_address || 'Not provided';
     const productName = event.name;
     const productPrice = event.price;
     const currency = event.currency;
     const paymentId = capture.result.id;
 
-    res.render('success', { payerName, payerEmail, productName, productPrice, currency, paymentId });
-
+    // Step 4: Render success page
+    res.render('success', {
+      payerName,
+      payerEmail,
+      productName,
+      productPrice,
+      currency,
+      paymentId,
+    });
   } catch (err) {
     console.error(err);
-    res.send('Error capturing payment');
+    res.send('Error authorizing or capturing payment');
   }
 };
 
+// ---------------------
+// Capture previously authorized payment (manual trigger)
+// ---------------------
+exports.captureAuthorizedPayment = async (req, res) => {
+  try {
+    const { authorizationId } = req.params; // you can send it in the URL
+    const client = payPalClient();
+
+    const request = new paypal.payments.AuthorizationsCaptureRequest(authorizationId);
+    request.requestBody({});
+
+    const capture = await client.execute(request);
+    console.log('Payment captured:', capture.result);
+    res.send('Payment captured successfully!');
+  } catch (err) {
+    console.error(err);
+    res.send('Error capturing authorized payment');
+  }
+};

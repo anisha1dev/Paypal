@@ -1,351 +1,115 @@
-![PayPal Order Flow](https://www.paypalobjects.com/ppdevdocs/orders-api/orders-api-standard-flow.png)
----
-NOTE: Set the 'Return URL' in your application > Log in with PayPal (Advanced settings)
+# Paypal integration
+
+# Event creator logs in
+
+### // Start OAuth login (redirect user to PayPal)
+
+1. Login using paypal developer account ([https://developer.paypal.com/dashboard/](https://developer.paypal.com/dashboard/))   
+2. Click Apps & Credentials, you will find the default application having *Client ID* and *Secret*  
+3. Click the Default application under Apps & Credentials, scroll down to *Log in with PayPal* and set your Return URL. Check the Full name, email, payer ID to receive information when return url is invoked. I have set Return URL as [https://unremissive-unfaithfully-laure.ngrok-free.dev/creator/callback](https://unremissive-unfaithfully-laure.ngrok-free.dev/creator/callback). Make sure that you set an https link, localhost wont save.  
+4. To start OAuth login (redirect event-creator to PayPal), you need to set base url as '[https://www.sandbox.paypal.com/signin/authorize](https://www.sandbox.paypal.com/signin/authorize)' with these query params:  
+   1. client\_id: PAYPAL\_APP\_CLIENT\_ID, (this is your Client ID)  
+      2. response\_type: 'code', (this is for requesting an authorization code)  
+      3. scope: 'openid profile email https://uri.paypal.com/services/paypalattributes',  
+      4. redirect\_uri: PAYPAL\_REDIRECT\_URI (this is the same Return URL)
+
+### // Handle OAuth callback manually
+
+1. Once the user allows access, PayPal redirects back to your Return URL (set in the app dashboard) with a query parameter code. Example: [https://yourapp.com/creator/callback?code=ABC123](https://yourapp.com/creator/callback?code=ABC123)   
+2. Receive the authorization code from the query param  
+   1. *code* is the authorization code that PayPal sends.  
+   2. If it’s missing, the process stops because you cannot get an access token without it.  
+3. Exchange code for an access token  
+   1. POST the body with grant\_type, code and Content-Type as *'application/x-www-form-urlencoded'* to [https://api.sandbox.paypal.com/v1/oauth2/token](https://api.sandbox.paypal.com/v1/oauth2/token)   
+      1. ‘grant\_type’: ‘authorization\_code’ → tells PayPal you’re using the Authorization Code flow.  
+      2. ‘Authorization’: \` Basic (Client ID:Secret).toBase64()\`  
+      3. const tokenData \= await tokenResp.json();  
+      4. Result: tokenData will contain:  
+         1. access\_token → used to call PayPal APIs  
+         2. refresh\_token → optional, to refresh the access token later  
+         3. expires\_in → token lifetime  
+   2. Fetch event-creator info from PayPal by passing in headers to [https://api.sandbox.paypal.com/v1/identity/oauth2/userinfo?schema=paypalv1.1](https://api.sandbox.paypal.com/v1/identity/oauth2/userinfo?schema=paypalv1.1) :  
+      1. 'Authorization': \`Bearer ${tokenData.access\_token}\`  
+4. Save or update event-creator in your database  
+   1. const me \= await meResp.json();  
+      1. name: me.name,  
+      2. email: me.emails\[0\].value,  
+      3. paypal\_merchant\_id: me.payer\_id,  
+      4. access\_token: tokenData.access\_token,  
+      5. token\_expires\_in: tokenData.expires\_in,  
+      6. token\_created\_at: new Date(),  
+5. Now event-creator can create events and charge for it.
+
+# Event Ticketing \+ PayPal Integration
+
+1. ### PayPal Client Helper
+
+   function payPalClient() {  
+     const environment \= new paypal.core.SandboxEnvironment(  
+       process.env.PAYPAL\_APP\_CLIENT\_ID,  
+       process.env.PAYPAL\_APP\_SECRET  
+     );  
+     return new paypal.core.PayPalHttpClient(environment);  
+   }  
+1. Creates a PayPal SDK client for sandbox testing.  
+2. Uses your app credentials to communicate with PayPal APIs.  
+3. Switch SandboxEnvironment → LiveEnvironment for production.  
+   
+
+2. ### Create PayPal Order (Authorize Intent) \[TO BE LINKED TO EVENT\]
+
+   1. exports.payEvent \= async (req, res) \=\> { ... }  
+1. Finds the event and its creator.  
+2. Uses PayPal SDK to create an order with AUTHORIZE intent:  
+   1. intent: 'AUTHORIZE' → only authorize first; capture later.  
+   2. purchase\_units.payee.email\_address → funds go to event creator.  
+3. Sets return\_url and cancel\_url for PayPal flow. (This would auto redirect the user from paypal payment page if he cancels or successfully pays. NOTE: The return\_url here is different from the callback url we have set in the application.)  
+4. Redirects the user to PayPal approval page.
+
+3. ### Authorize \+ Auto-Capture Payment \[LINKED WITH THE RETURN\_URL SET WHILE CREATING EVENT-PAY-ORDER\]
+
+   1. exports.authorizeOrder \= async (req, res) \=\> { ... }  
+      1. Step 1: Authorize payment  
+         1. Receives token from PayPal after approval as a query param along with eventId.  
+            1. NOTE on eventId  
+               1. The eventId comes from where the user initiates the payment—it’s essentially the ID of the event they want to buy a ticket for.  
+                  1. eventId is read from the Event-book-now form submitted by the user (POST request).  
+                  2. It must match the \_id of the event in your MongoDB Event collection.  
+                  3. How it flows to authorizeOrder  
+                     1. return\_url: \`${req.protocol}://${req.get('host')}/authorize?eventId=${event.\_id}\`  
+                        1. When creating the PayPal order, you include the eventId in the return URL as a query parameter.  
+                        2. After the user approves the payment, PayPal redirects them back with token (authorization token) and your eventId query parameter.  
+                        3. This lets your authorizeOrder route know which event the payment is for.  
+            2. Calls OrdersAuthorizeRequest(token) → creates an authorization.  
+               1. const authorizeRequest \= new paypal.orders.OrdersAuthorizeRequest(token);  
+               2. const authorization \= await client.execute(authorizeRequest);  
+      2. Step 2: Auto-capture  
+         1. Extract authorizationId → call   
+            1. const authorizationId \= authorization.result.purchase\_units\[0\].payments.authorizations\[0\].id;  
+         2. const captureRequest \= new paypal.payments.AuthorizationsCaptureRequest(authorizationId);  
+         3. const capture \= await client.execute(captureRequest);  
+         4. const paymentId \= capture.result.id;  
+         5. Funds are now captured from the payer and sent to the creator.  
+      3. Step 3: Extract details safely  
+         1. Payer name, email, product name, price, currency, and payment ID.  
+            1. const payerName \=  
+            2. authorization.result.payer?.name?.given\_name || 'Customer';  
+            3. const payerEmail \=  
+            4. authorization.result.payer?.email\_address || 'Not provided';  
+            5. const productName \= event.name;  
+            6. const productPrice \= event.price;  
+            7. const currency \= event.currency;  
+            8. const paymentId \= capture.result.id;  
+      4. Step 4: Render success page  
+         1. Shows a confirmation page with all payment details.
+
+4. ### If you want to later on \[Capture Previously Authorized Payment (Manual Trigger)\]
+
+   1. exports.captureAuthorizedPayment \= async (req, res) \=\> { ... }  
+      1. Can be called manually with an authorizationId.  
+      2. Useful for delayed capture scenarios or if you want to control capture timing.  
+         1. const { authorizationId } \= req.params; // you can send it in the URL  
+         2. const client \= payPalClient();  
+         3. const request \= new paypal.payments.AuthorizationsCaptureRequest(authorizationId);  
+         4. const capture \= await client.execute(request);
 
-### **1️⃣ Creator OAuth Login Flow**
-
-1. **Login Page** – Creator visits `/creator/login`.
-2. **Redirect to PayPal** – `startOAuth` sends them to PayPal OAuth consent page.
-3. **PayPal Callback** – After approval, PayPal redirects to `/creator/callback` with `code`.
-4. **Exchange Code** – Server exchanges `code` for `access_token` & `refresh_token`.
-5. **Fetch Creator Info** – Use `access_token` to fetch creator's PayPal `payer_id` and email.
-6. **Save/Update Creator** – Store tokens and info in DB (`Creator` model). Set `req.session.creatorId`.
-7. **Redirect to Event Creation** – `/creator/create-event`.
-
----
-
-### **2️⃣ Event Management**
-
-1. **Render Create Event Page** – Only logged-in creators can access.
-2. **Create Event** – Save event info (`name`, `description`, `price`, `currency`, creator ID) to DB (`Event` model).
-3. **List Events** – Public page showing all events.
-
----
-
-### **3️⃣ Event Payment Flow (Customer)**
-
-1. **Pay for Event** – Customer clicks “Pay” on an event → triggers `payEvent`.
-2. **Create PayPal Order** – Server calls PayPal `OrdersCreateRequest` with event price & creator as payee.
-3. **Redirect to PayPal** – Customer approves payment on PayPal site.
-4. **Capture Payment** – After approval, PayPal redirects to `/capture?eventId=...`.
-5. **Finalize Order** – Server captures the payment (`OrdersCaptureRequest`) and shows success page with payment details.
-
----
-
-💡 **Key Points**
-
-* **Creators** authenticate via PayPal OAuth to get `payer_id` & tokens.
-* **Events** are linked to creators and can be paid for by customers via PayPal.
-* **PayPal SDK** is used for creating and capturing orders.
-* **Sessions** are used to track logged-in creators.
-
----
-
-## References
-- [Get Access Token](https://developer.paypal.com/api/rest/#link-getaccesstoken)  
-- [Create Order](https://developer.paypal.com/docs/api/orders/v2/#orders_create)  
-- [Get Order](https://developer.paypal.com/docs/api/orders/v2/#orders_get)  
-- [Capture Order](https://developer.paypal.com/docs/api/orders/v2/#orders_capture)
-# PayPal OAuth2 Token Request
-## cURL Command
-
-```bash
-curl -v -X POST "https://api-m.sandbox.paypal.com/v1/oauth2/token" \
- -u "CLIENT_ID:CLIENT_SECRET" \
- -H "Content-Type: application/x-www-form-urlencoded" \
- -d "grant_type=client_credentials"
-````
-
-### Instructions
-
-1. **Modify the code**
-
-   * Replace `CLIENT_ID` with your PayPal client ID.
-   * Replace `CLIENT_SECRET` with your PayPal client secret.
-
-
-## Sample Response
-
-PayPal will return an access token along with its expiration time:
-
-```json
-{
-  "scope": "https://uri.paypal.com/services/invoicing https://uri.paypal.com/services/disputes/read-buyer https://uri.paypal.com/services/payments/realtimepayment https://uri.paypal.com/services/disputes/update-seller https://uri.paypal.com/services/payments/payment/authcapture openid https://uri.paypal.com/services/disputes/read-seller https://uri.paypal.com/services/payments/refund https://api-m.paypal.com/v1/vault/credit-card https://api-m.paypal.com/v1/payments/.* https://uri.paypal.com/payments/payouts https://api-m.paypal.com/v1/vault/credit-card/.* https://uri.paypal.com/services/subscriptions https://uri.paypal.com/services/applications/webhooks",
-  "access_token": "A21AAFEpH4PsADK7qSS7pSRsgzfENtu-Q1ysgEDVDESseMHBYXVJYE8ovjj68elIDy8nF26AwPhfXTIeWAZHSLIsQkSYz9ifg",
-  "token_type": "Bearer",
-  "app_id": "APP-80W284485P519543T",
-  "expires_in": 31668,
-  "nonce": "2020-04-03T15:35:36ZaYZlGvEkV4yVSz8g6bAKFoGSEzuy3CQcz3ljhibkOHg"
-}
-```
----
-# PayPal Orders API – Create Order
-
-## Endpoint
-
-```
-POST /v2/checkout/orders
-```
-
-Creates an order. Merchants and partners can add Level 2 and 3 data to payments to reduce risk and processing costs.
-
----
-
-## Security
-
-* OAuth2 access token required in the `Authorization` header. Return / Cancel url can be customized.
-* `PayPal-Request-Id`: string (1–108 chars) — idempotency key; stores keys for 6 hours (up to 72 hours on request). **Mandatory** for single-step create order calls with payment source.
-  
-Optional headers:
-* `PayPal-Partner-Attribution-Id`: string (1–36 chars)
-* `PayPal-Client-Metadata-Id`: string (1–36 chars)
-* `Prefer`: string (1–25 chars) — default: `return=minimal`
-
-  * `return=minimal`: returns id, status, and HATEOAS links (default)
-  * `return=representation`: returns full resource representation
-* `PayPal-Auth-Assertion`: JSON Web Token (JWT) identifying the merchant
-
----
-
-## Request Body
-
-```json
-{
-  "intent": "CAPTURE",
-  "purchase_units": [
-    {
-      "amount": {
-        "currency_code": "USD",
-        "value": "100.00"
-      },
-      "payee": {
-          "email_address": event.creator.email
-      }
-    }
-  ],
-  "payment_source": {
-    "paypal": {
-      "experience_context": {
-        "payment_method_preference": "IMMEDIATE_PAYMENT_REQUIRED",
-        "landing_page": "LOGIN",
-        "shipping_preference": "GET_FROM_FILE",
-        "user_action": "PAY_NOW",
-        "return_url": "https://example.com/returnUrl",
-        "cancel_url": "https://example.com/cancelUrl"
-      }
-    }
-  }
-}
-```
-
-### Required Fields
-
-* `intent`: `"CAPTURE"` or `"AUTHORIZE"`
-
-  * **CAPTURE**: immediately capture funds
-  * **AUTHORIZE**: place funds on hold for later capture (valid for up to 29 days)
-* `purchase_units`: array of 1–10 objects defining the items being purchased
-* `payment_source`: defines the payment method (`paypal`, `card`, `vault_id`, etc.)
-
----
-
-## Responses
-
-### 200 – OK
-
-> A successful response to an idempotent request returns HTTP 200 with the JSON body showing order details.
-
-### 201 – Created
-
-> A successful request returns HTTP 201 with a minimal response by default: order ID, status, and HATEOAS links.
-> To receive the complete order resource, pass header:
-> `Prefer: return=representation`
-
-### 400 – Bad Request
-
-> Request is syntactically incorrect, violates schema, or is malformed.
-
-### 422 – Unprocessable Entity
-
-> Requested action could not be performed, semantically incorrect, or failed business validation.
-
----
-
-## Notes
-
-* Multiple purchase units can be included, but `AUTHORIZE` intent does **not support multiple purchase units**.
-* The `payer` object is deprecated; use `payment_source.paypal` instead.
-* Optional `application_context` can be used to customize the payer experience.
-
----
-
-# PayPal Orders API – Get Order Details
-
-## Endpoint
-
-```
-GET /v2/checkout/orders/{id}
-```
-
-Shows details for a specific order by its ID.
-
-> **Note:** For error handling and troubleshooting, see [Orders v2 errors](https://developer.paypal.com/docs/api/orders/v2/#errors).
-
----
-
-## Security
-
-* OAuth2 access token required in the `Authorization` header.
-* Optional header: `PayPal-Auth-Assertion` — a JSON Web Token (JWT) identifying the merchant.
-
----
-
-## Request
-
-### Path Parameters
-
-| Parameter | Type   | Required | Description                      |
-| --------- | ------ | -------- | -------------------------------- |
-| `id`      | string | yes      | The ID of the order (1–36 chars) |
-
-### Query Parameters
-
-| Parameter | Type   | Description                                                             |
-| --------- | ------ | ----------------------------------------------------------------------- |
-| `fields`  | string | Comma-separated list of fields to return. Valid value: `payment_source` |
-
----
-
-## Sample Request (cURL)
-
-```bash
-curl -v -X GET https://api-m.sandbox.paypal.com/v2/checkout/orders/5O190127TN364715T \
--H 'Authorization: Bearer <ACCESS_TOKEN>'
-```
-
----
-
-## Responses
-
-### 200 – OK
-
-> Returns order details in JSON format.
-
-Example minimal response:
-
-```json
-{
-  "id": "5O190127TN364715T",
-  "status": "CREATED",
-  "purchase_units": [
-    {
-      "reference_id": "PUHF",
-      "amount": {
-        "currency_code": "USD",
-        "value": "100.00"
-      }
-    }
-  ],
-  "payer": {
-    "name": { "given_name": "John", "surname": "Doe" },
-    "email_address": "customer@example.com",
-    "payer_id": "PAYERID123"
-  }
-}
-```
-
-### 404 – Not Found
-
-> The specified resource does not exist.
-
----
-
-# PayPal Orders API – Capture Payment for an Order
-
-## Endpoint
-
-```
-POST /v2/checkout/orders/{id}/capture
-```
-
-Captures payment for an order.
-
-> The buyer must first approve the order or a valid `payment_source` must be provided.
-> A buyer can approve the order by visiting the `rel:approve` URL returned in the HATEOAS links in the create order response.
-
-> **Note:** For error handling and troubleshooting, see [Orders v2 errors](https://developer.paypal.com/docs/api/orders/v2/#errors).
-
----
-
-## Security
-
-* OAuth2 access token required in the `Authorization` header.
-* Optional header: `PayPal-Auth-Assertion` — a JSON Web Token (JWT) identifying the merchant.
-
----
-
-## Request
-
-### Path Parameters
-
-| Parameter | Type   | Required | Description                      |
-| --------- | ------ | -------- | -------------------------------- |
-| `id`      | string | yes      | The ID of the order (1–36 chars) |
-
-### Header Parameters
-
-| Header                      | Type   | Description                                                                                         |
-| --------------------------- | ------ | --------------------------------------------------------------------------------------------------- |
-| `PayPal-Request-Id`         | string | Idempotency key (1–108 chars). Keys stored 6 hours by default; can request up to 72 hours. |
-| `Prefer`                    | string | Default: `return=minimal`. Use `return=representation` to get full resource details.                |
-| `PayPal-Client-Metadata-Id` | string | Optional, 1–36 chars                                                                                |
-| `PayPal-Auth-Assertion`     | string | Optional JWT identifying the merchant                                                               |
-
-### Request Body
-
-* `payment_source` (object) — Optional. Defines a payment source.
-* Content-Type: `application/json`.
-
-Minimal request body example:
-
-```json
-{}
-```
-
----
-
-## Sample Request (cURL)
-
-```bash
-curl -v -X POST https://api-m.sandbox.paypal.com/v2/checkout/orders/5O190127TN364715T/capture \
--H 'Content-Type: application/json' \
--H 'PayPal-Request-Id: 7b92603e-77ed-4896-8e78-5dea2050476a' \
--H 'Authorization: Bearer <ACCESS_TOKEN>' \
--d '{}'
-```
-
----
-
-## Responses
-
-### 200 – OK
-
-> Successful response to an idempotent request. Returns captured payment details (minimal by default).
-
-### 201 – Created
-
-> Successful response to a non-idempotent request. Returns captured payment details. If the request is retried, returns 200 OK.
-
-### 403 – Forbidden
-
-> Authorized payment failed due to insufficient permissions.
-
-### 404 – Not Found
-
-> The specified order does not exist.
-
-### 422 – Unprocessable Entity
-
-> Requested action could not be performed, semantically incorrect, or failed business validation.
-
----
