@@ -1,6 +1,9 @@
 // controllers/eventController.js
 const Event = require('../models/Event');
 const paypal = require('@paypal/checkout-server-sdk');
+const Stripe = require('stripe');
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const Creator = require('../models/Creator');
 
 // ---------------------
 // Helper: create PayPal client
@@ -26,14 +29,43 @@ exports.renderCreateEvent = (req, res) => {
 // ---------------------
 exports.createEvent = async (req, res) => {
   try {
-    const { name, description, price, currency } = req.body;
-    const creatorId = req.session.creatorId;
-    const event = new Event({ name, description, price, currency, creator: creatorId });
+    console.log("🎯 Incoming event data:", req.body);
+
+    const { name, description, price, currency, creatorId, paymentMethod } = req.body;
+
+    // 1️⃣ Validate the creator exists
+    const creator = await Creator.findById(req.session.creatorId);
+    if (!creator) {
+      console.warn('⚠️ Creator not found:', req.session.creatorId);
+      return res.send('Creator not found');
+    }
+
+
+    // 2️⃣ Create event
+    const event = new Event({
+      name,
+      description,
+      price,
+      currency: currency || 'USD',
+      creator: creator._id,
+      paymentMethod: paymentMethod || 'paypal',
+    });
+
+    // 3️⃣ Save
     await event.save();
+
+    console.log("✅ Event created successfully:", {
+      id: event._id,
+      name: event.name,
+      paymentMethod: event.paymentMethod,
+      creator: creator.email || creator._id,
+    });
+    
     res.redirect('/events');
-  } catch (err) {
-    console.error(err);
-    res.send('Error creating event');
+
+  } catch (error) {
+    console.error("❌ Error creating event:", error);
+    res.status(500).json({ error: error.message });
   }
 };
 
@@ -56,15 +88,19 @@ exports.listEvents = async (req, res) => {
 exports.payEvent = async (req, res) => {
   try {
     const eventId = req.body.eventId;
-    const event = await Event.findById(eventId).populate('creator');
+    const event = await Event.findById(eventId).populate('creator'); //DB search
     if (!event) return res.send('Event not found');
 
     const client = payPalClient();
 
     const request = new paypal.orders.OrdersCreateRequest();
     request.prefer('return=representation');
+    // This tells PayPal: When responding, return the full representation 
+    // of the resource I just created instead of minimal info.
+    // This way you get a full object with Purchase units, 
+    // Amount, Currency, Payer info, Links.
     request.requestBody({
-      intent: 'AUTHORIZE', // ✅ authorize first
+      intent: 'AUTHORIZE', // authorize first
       purchase_units: [
         {
           amount: {
@@ -72,7 +108,7 @@ exports.payEvent = async (req, res) => {
             value: event.price.toString(),
           },
           payee: {
-            email_address: event.creator.email,
+            email_address: event.creator.email, // Event creator's email
           },
           description: event.description,
         },
@@ -97,12 +133,12 @@ exports.payEvent = async (req, res) => {
 };
 
 // ---------------------
-// Authorize + Auto-Capture Payment
+// Authorize Payment
 // ---------------------
 exports.authorizeOrder = async (req, res) => {
   try {
     const { token, eventId } = req.query;
-    const event = await Event.findById(eventId).populate('creator');
+    const event = await Event.findById(eventId).populate('creator'); //from DB
     const client = payPalClient();
 
     // Step 1: Authorize
@@ -113,14 +149,14 @@ exports.authorizeOrder = async (req, res) => {
     const authorizationId =
       authorization.result.purchase_units[0].payments.authorizations[0].id;
 
-    console.log('Authorization ID:', authorizationId);
+    console.log(JSON.stringify(authorization, null, 2));
+
 
     // Step 2: Auto-capture
     const captureRequest = new paypal.payments.AuthorizationsCaptureRequest(authorizationId);
     captureRequest.requestBody({});
     const capture = await client.execute(captureRequest);
-
-    console.log('Payment captured:', capture.result);
+    console.log(JSON.stringify(capture, null, 2));
 
     // Step 3: Safe extraction
     const payerName =
@@ -147,22 +183,82 @@ exports.authorizeOrder = async (req, res) => {
   }
 };
 
-// ---------------------
-// Capture previously authorized payment (manual trigger)
-// ---------------------
-exports.captureAuthorizedPayment = async (req, res) => {
+
+exports.createStripeSession = async (req, res) => {
   try {
-    const { authorizationId } = req.params; // you can send it in the URL
-    const client = payPalClient();
+    const { eventId } = req.body;
+    const event = await Event.findById(eventId).populate('creator');
+    if (!event) return res.status(404).send('Event not found');
+    if (!event.creator.stripe_account_id) return res.status(400).send('Creator not connected to Stripe');
 
-    const request = new paypal.payments.AuthorizationsCaptureRequest(authorizationId);
-    request.requestBody({});
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: (event.currency || 'USD').toLowerCase(),
+          product_data: { name: event.name },
+          unit_amount: Math.round(event.price * 100),
+        },
+        quantity: 1,
+      }],
+      mode: 'payment',
+      payment_intent_data: {
+        transfer_data: {
+          destination: event.creator.stripe_account_id,
+        },
+      },
+      success_url: `${req.protocol}://${req.get('host')}/stripe/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${req.protocol}://${req.get('host')}/events`,
+    });
 
-    const capture = await client.execute(request);
-    console.log('Payment captured:', capture.result);
-    res.send('Payment captured successfully!');
+
+    res.redirect(session.url);
+
   } catch (err) {
-    console.error(err);
-    res.send('Error capturing authorized payment');
+    console.error('Stripe Session Error:', err.raw || err);
+    res.status(500).send('Stripe session creation error: ' + err.message);
   }
 };
+
+exports.stripeSuccess = async (req, res) => {
+  try {
+    const { session_id } = req.query;
+    console.log("🔹 Stripe Success: Received session_id =", session_id);
+
+    const session = await stripe.checkout.sessions.retrieve(session_id);
+    console.log("✅ Stripe Session Retrieved:", session);
+
+    const lineItems = await stripe.checkout.sessions.listLineItems(session_id);
+    const item = lineItems.data[0];
+    console.log("✅ Stripe Line Items:", item);
+
+    const payerName = session.customer_details?.name || 'Stripe Customer';
+    const payerEmail = session.customer_details?.email || 'Not provided';
+    const productName = item?.description || 'Event Ticket';
+    const productPrice = (item?.amount_total / 100).toFixed(2);
+    const currency = session.currency?.toUpperCase() || 'USD';
+    const paymentId = session.payment_intent;
+
+    console.log("✅ Stripe Payment Summary:", {
+      payerName,
+      payerEmail,
+      productName,
+      productPrice,
+      currency,
+      paymentId,
+    });
+
+    res.render('success', {
+      payerName,
+      payerEmail,
+      productName,
+      productPrice,
+      currency,
+      paymentId,
+    });
+  } catch (err) {
+    console.error("❌ Stripe success error:", err);
+    res.status(500).send('Error rendering Stripe success page');
+  }
+};
+

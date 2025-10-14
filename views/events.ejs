@@ -66,13 +66,21 @@
       <div class="event">
         <h2><%= event.name %></h2>
         <p><%= event.description %></p>
-        <p><strong>Price: $<%= event.price %></strong></p>
-        <p>By: <%= event.creator.name %></p>
+        <p><strong>Price: <%= event.price %> <%= event.currency %></strong></p>
 
-        <form action="/pay-event" method="POST">
-          <input type="hidden" name="eventId" value="<%= event._id %>">
-          <button type="submit">Book Now</button>
-        </form>
+        <% if (event.creator.paypal_merchant_id) { %>
+          <form action="/pay-event" method="POST">
+            <input type="hidden" name="eventId" value="<%= event._id %>">
+            <button type="submit">Pay with PayPal</button>
+          </form>
+        <% } %>
+
+        <% if (event.creator.stripe_account_id) { %>
+          <form action="/stripe-session" method="POST">
+            <input type="hidden" name="eventId" value="<%= event._id %>" />
+            <button type="submit">Pay with Stripe</button>
+          </form>
+        <% } %>
       </div>
     <% }) %>
   </div>

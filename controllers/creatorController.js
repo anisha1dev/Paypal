@@ -1,88 +1,128 @@
-// controllers/creatorController.js
 const Creator = require('../models/Creator');
-const { Client, Environment } = require('@paypal/paypal-server-sdk');
+const fetch = require('node-fetch');
+const Stripe = require('stripe');
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 // Render login page
 exports.renderLogin = (req, res) => {
-  res.render('login');
+  res.render('login'); // Make sure you have views/login.ejs
 };
 
-// Start OAuth login (redirect user to PayPal)
-exports.startOAuth = (req, res) => {
+// -----------------------
+// PayPal OAuth
+// -----------------------
+exports.startPayPalOAuth = (req, res) => {
   const baseUrl = 'https://www.sandbox.paypal.com/signin/authorize';
   const params = new URLSearchParams({
     client_id: process.env.PAYPAL_APP_CLIENT_ID,
-    response_type: 'code',
+    response_type: 'code', // (this is for requesting an authorization code)
     scope: 'openid profile email https://uri.paypal.com/services/paypalattributes',
-    redirect_uri: process.env.PAYPAL_REDIRECT_URI
+    redirect_uri: process.env.PAYPAL_REDIRECT_URI, //(this is the same Return URL)
   });
-
   res.redirect(`${baseUrl}?${params.toString()}`);
 };
 
-// Handle OAuth callback manually
-exports.creatorCallback = async (req, res) => {
-  const { code } = req.query;
-  if (!code) return res.send('No code received');
+// -----------------------
+// Handle OAuth Callback
+// -----------------------
+exports.payPalCallback = async (req, res) => {
+  const { code } = req.query; // authorization code that PayPal sends
+  if (!code) return res.send('No code received from PayPal');
 
   try {
-    // --- Exchange code for access token ---
-    const params = new URLSearchParams();
-    params.append('grant_type', 'authorization_code');
-    params.append('code', code);
-
+    // Exchange code for access token
     const tokenResp = await fetch('https://api.sandbox.paypal.com/v1/oauth2/token', {
       method: 'POST',
       headers: {
-        'Authorization': 'Basic ' + Buffer.from(`${process.env.PAYPAL_APP_CLIENT_ID}:${process.env.PAYPAL_APP_SECRET}`).toString('base64'),
+        Authorization: 'Basic ' + Buffer.from(`${process.env.PAYPAL_APP_CLIENT_ID}:${process.env.PAYPAL_APP_SECRET}`).toString('base64'),
         'Content-Type': 'application/x-www-form-urlencoded',
       },
-      body: params
+      body: new URLSearchParams({ grant_type: 'authorization_code', code }),
     });
-
     const tokenData = await tokenResp.json();
-    if (!tokenData.access_token) return res.send('Failed to get access token');
+    console.log("tokenData:",tokenData)
+    if (!tokenData.access_token) return res.send('Failed to get PayPal access token');
 
-    // --- Fetch merchant info from PayPal (this is key for payer_id) ---
+    // Fetch user info
     const meResp = await fetch('https://api.sandbox.paypal.com/v1/identity/oauth2/userinfo?schema=paypalv1.1', {
-      headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
     });
-
     const me = await meResp.json();
-    console.log(me); // after fetching user info
+    if (!me.payer_id) return res.send('PayPal payer_id missing');
 
-    if (!me.payer_id) return res.send('Error: payer_id missing in PayPal response');
-    const existingCreator = await Creator.findOne({ email: me.emails[0].value });
-
-    if (existingCreator) {
-    // Update access token if already exists
-    existingCreator.access_token = tokenData.access_token;
-    existingCreator.refresh_token = tokenData.refresh_token || existingCreator.refresh_token;
-    existingCreator.token_expires_in = tokenData.expires_in || existingCreator.token_expires_in;
-    existingCreator.token_created_at = new Date();
-    await existingCreator.save();
-
-    req.session.creatorId = existingCreator._id;
+    let creator = await Creator.findOne({ email: me.emails[0].value });
+    if (creator) {
+      // Update tokens
+      creator.paypal_access_token = tokenData.access_token; // used to call PayPal APIs
+      creator.paypal_refresh_token = tokenData.refresh_token || creator.paypal_refresh_token;
+      creator.token_expires_in = tokenData.expires_in || creator.token_expires_in;
+      creator.token_created_at = new Date();
+      await creator.save();
     } else {
-    // Create new creator
-    const creator = new Creator({
+      creator = new Creator({
         name: me.name,
-        email: me.emails[0].value,
+        email: me.emails[0].value, // will be required for payments
         paypal_merchant_id: me.payer_id,
-        access_token: tokenData.access_token,
+        paypal_access_token: tokenData.access_token,
         token_expires_in: tokenData.expires_in,
         token_created_at: new Date(),
-    });
-    await creator.save();
+      });
+      await creator.save();
+    }
     req.session.creatorId = creator._id;
+    res.redirect('/creator/create-event');
+  } catch (err) {
+    console.error(err);
+    res.send('PayPal OAuth error');
+  }
+};
+
+// -----------------------
+// Stripe OAuth
+// -----------------------
+exports.startStripeOAuth = (req, res) => {
+  const clientId = process.env.STRIPE_CLIENT_ID;
+  const redirectUri = process.env.STRIPE_REDIRECT_URI;
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: clientId,
+    scope: 'read_write',
+    redirect_uri: redirectUri,
+  });
+  res.redirect(`https://connect.stripe.com/oauth/authorize?${params.toString()}`);
+};
+
+exports.stripeCallback = async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.send('No code received from Stripe');
+
+  try {
+    const response = await stripe.oauth.token({ grant_type: 'authorization_code', code });
+    const stripeUserId = response.stripe_user_id;
+    const accessToken = response.access_token;
+
+    const account = await stripe.accounts.retrieve(stripeUserId);
+    let creator = await Creator.findOne({ stripe_account_id: stripeUserId });
+    if (!creator) {
+      creator = new Creator({
+        name: account.display_name || account.business_name,
+        email: account.email || null,
+        stripe_account_id: stripeUserId,
+        stripe_access_token: accessToken,
+      });
+      await creator.save();
+    } else {
+      creator.stripe_access_token = accessToken;
+      await creator.save();
     }
 
-    // Redirect in both cases
-    // After saving or updating creator in DB
+    req.session.creatorId = creator._id;
+
+    // ✅ After Stripe login, redirect to event creation page
     res.redirect('/creator/create-event');
 
   } catch (err) {
-    console.error(err);
-    res.send('Error during PayPal OAuth');
+    console.error('❌ Stripe OAuth error:', err);
+    res.send('Stripe OAuth error');
   }
 };

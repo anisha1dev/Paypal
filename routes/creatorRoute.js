@@ -1,20 +1,19 @@
 const express = require('express');
 const router = express.Router();
 const creatorController = require('../controllers/creatorController');
-const eventController = require('../controllers/eventController'); // import this
 
 // Login / OAuth
 router.get('/login', creatorController.renderLogin);
-router.get('/oauth', creatorController.startOAuth);
-router.get('/callback', creatorController.creatorCallback);
+router.get('/paypal-oauth', creatorController.startPayPalOAuth);
+router.get('/callback', creatorController.payPalCallback);
+router.get('/stripe-oauth', creatorController.startStripeOAuth);
+router.get('/stripe/callback', creatorController.stripeCallback);
 
-// Create Event page
+// Create Event
 router.get('/create-event', (req, res) => {
   if (!req.session.creatorId) return res.redirect('/creator/login');
   res.render('create-event');
 });
-
-// Handle form submission (POST)
-router.post('/create-event', eventController.createEvent);
+router.post('/create-event', require('../controllers/eventController').createEvent);
 
 module.exports = router;

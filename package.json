@@ -19,6 +19,7 @@
     "express-session": "^1.18.2",
     "mongoose": "^8.19.1",
     "node-fetch": "^2.7.0",
-    "paypal-rest-sdk": "^1.8.1"
+    "paypal-rest-sdk": "^1.8.1",
+    "stripe": "^19.1.0"
   }
 }

@@ -8,9 +8,22 @@
   <style>
     .success-container { text-align:center; padding:50px; }
     .checkmark { font-size:80px; color:#28a745; animation:pop 0.5s ease-out; }
-    @keyframes pop { 0% {transform:scale(0);} 80% {transform:scale(1.2);} 100% {transform:scale(1);} }
+    @keyframes pop {
+      0% { transform:scale(0); }
+      80% { transform:scale(1.2); }
+      100% { transform:scale(1); }
+    }
     .details { margin-top:20px; font-size:1.1rem; color:#333; }
-    .home-btn { margin-top:30px; display:inline-block; padding:10px 20px; background-color:#0070ba; color:white; border-radius:5px; text-decoration:none; transition:0.2s; }
+    .home-btn {
+      margin-top:30px;
+      display:inline-block;
+      padding:10px 20px;
+      background-color:#0070ba;
+      color:white;
+      border-radius:5px;
+      text-decoration:none;
+      transition:0.2s;
+    }
     .home-btn:hover { background-color:#005ea6; }
   </style>
 </head>
@@ -18,11 +31,29 @@
   <div class="success-container">
     <div class="checkmark">✔️</div>
     <h1>Payment Successful!</h1>
-    <p class="details">Thank you, <strong><%= payerName %></strong>!</p>
-    <p class="details">You purchased: <strong><%= productName %></strong></p>
-    <p class="details">Amount Paid: <strong><%= productPrice %> <%= currency %></strong></p>
-    <p class="details">Payment ID: <%= paymentId %></p>
-    <p class="details">Receipt sent to: <%= payerEmail %></p>
+
+    <p class="details">
+      Thank you, <strong><%= payerName || 'Customer' %></strong>!
+    </p>
+    <p class="details">
+      You purchased: <strong><%= productName || 'Event Ticket' %></strong>
+    </p>
+    <p class="details">
+      Amount Paid: <strong><%= productPrice || '0.00' %> <%= currency || 'USD' %></strong>
+    </p>
+    <p class="details">
+      Payment ID: <strong><%= paymentId || 'N/A' %></strong>
+    </p>
+    <p class="details">
+      Receipt sent to: <strong><%= payerEmail || 'Not provided' %></strong>
+    </p>
+
+    <% if (typeof paymentMethod !== 'undefined') { %>
+      <p class="details">
+        Payment Method: <strong><%= paymentMethod.toUpperCase() %></strong>
+      </p>
+    <% } %>
+
     <a href="/events" class="home-btn">Back to Home</a>
   </div>
 </body>
