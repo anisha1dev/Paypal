@@ -29,9 +29,7 @@ exports.renderCreateEvent = (req, res) => {
 // ---------------------
 exports.createEvent = async (req, res) => {
   try {
-    console.log("🎯 Incoming event data:", req.body);
-
-    const { name, description, price, currency, creatorId, paymentMethod } = req.body;
+    const { name, description, price, currency, paymentMethod } = req.body;
 
     // 1️⃣ Validate the creator exists
     const creator = await Creator.findById(req.session.creatorId);
@@ -211,6 +209,7 @@ exports.createStripeSession = async (req, res) => {
       cancel_url: `${req.protocol}://${req.get('host')}/events`,
     });
 
+    console.log("session",session)
 
     res.redirect(session.url);
 

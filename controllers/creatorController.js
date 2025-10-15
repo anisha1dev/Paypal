@@ -84,7 +84,7 @@ exports.startStripeOAuth = (req, res) => {
   const clientId = process.env.STRIPE_CLIENT_ID;
   const redirectUri = process.env.STRIPE_REDIRECT_URI;
   const params = new URLSearchParams({
-    response_type: 'code',
+    response_type: 'code', // implies the need for an authorization_code in the redirect uri
     client_id: clientId,
     scope: 'read_write',
     redirect_uri: redirectUri,
@@ -98,10 +98,12 @@ exports.stripeCallback = async (req, res) => {
 
   try {
     const response = await stripe.oauth.token({ grant_type: 'authorization_code', code });
+    console.log("response", response)
     const stripeUserId = response.stripe_user_id;
     const accessToken = response.access_token;
 
     const account = await stripe.accounts.retrieve(stripeUserId);
+    console.log("account", account)
     let creator = await Creator.findOne({ stripe_account_id: stripeUserId });
     if (!creator) {
       creator = new Creator({
