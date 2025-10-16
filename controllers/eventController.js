@@ -108,7 +108,7 @@ exports.payEvent = async (req, res) => {
           payee: {
             email_address: event.creator.email, // Event creator's email
           },
-          description: event.description,
+          description: 'socioplace',
         },
       ],
       application_context: {
@@ -189,12 +189,18 @@ exports.createStripeSession = async (req, res) => {
     if (!event) return res.status(404).send('Event not found');
     if (!event.creator.stripe_account_id) return res.status(400).send('Creator not connected to Stripe');
 
+    // Get email from your session (assuming you store logged-in user email)
+    const customerEmail = req.session.userEmail || req.session.creatorEmail || 'no-email@example.com';
+
     const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
+      payment_method_types: ['card'], // only card
       line_items: [{
         price_data: {
           currency: (event.currency || 'USD').toLowerCase(),
-          product_data: { name: event.name },
+          product_data: { 
+            name: event.name,
+            description: 'socioplace'
+           },
           unit_amount: Math.round(event.price * 100),
         },
         quantity: 1,
@@ -205,11 +211,10 @@ exports.createStripeSession = async (req, res) => {
           destination: event.creator.stripe_account_id,
         },
       },
+      customer_email: customerEmail, // ✅ pre-fill email in Stripe Checkout
       success_url: `${req.protocol}://${req.get('host')}/stripe/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${req.protocol}://${req.get('host')}/events`,
     });
-
-    console.log("session",session)
 
     res.redirect(session.url);
 
@@ -218,6 +223,7 @@ exports.createStripeSession = async (req, res) => {
     res.status(500).send('Stripe session creation error: ' + err.message);
   }
 };
+
 
 exports.stripeSuccess = async (req, res) => {
   try {
