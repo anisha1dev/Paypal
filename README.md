@@ -5,7 +5,7 @@
 1. Login using paypal developer account ([https://developer.paypal.com/dashboard/](https://developer.paypal.com/dashboard/))   
 2. Click Apps & Credentials, you will find the default application having *Client ID* and *Secret*
 
-*![][image1]*
+<img width="1123" height="116" alt="Screenshot 2025-11-01 103134" src="https://github.com/user-attachments/assets/eb6e46d8-cdcd-4a94-b542-6d1a59c9b604" />
 
 3. Click the Default application under Apps & Credentials, scroll down to *Log in with PayPal* and set your Return URL. 
 
