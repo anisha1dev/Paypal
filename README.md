@@ -9,11 +9,11 @@
 
 3. Click the Default application under Apps & Credentials, scroll down to *Log in with PayPal* and set your Return URL. 
 
-![][image2]
+<img width="1131" height="533" alt="2" src="https://github.com/user-attachments/assets/52857222-1d2e-4313-b68e-1c30c7881e59" />
 
 4. Check the Full name, email, payer ID to receive information when return url is invoked. I have set Return URL as [https://unremissive-unfaithfully-laure.ngrok-free.dev/creator/callback](https://unremissive-unfaithfully-laure.ngrok-free.dev/creator/callback). Make sure that you set an https link, localhost wont save. NOTE: nativexo://paypalpay is for mobile platforms
 
-![][image3]![][image4]
+<img width="997" height="593" alt="image" src="https://github.com/user-attachments/assets/b99b490d-653b-43a0-a291-e9ccd8afbc1f" />
 
 # Event creator login
 
@@ -217,7 +217,8 @@ exports.payEvent \= async (req, res) \=\> {
 };
 
 [https://www.sandbox.paypal.com/myaccount/activities/](https://www.sandbox.paypal.com/myaccount/activities/)   
-![][image5]  
+<img width="1127" height="568" alt="image" src="https://github.com/user-attachments/assets/e03a29fb-8ec3-408b-8cb1-23e49064aeec" />
+
 **Request**  
 POST  
 SDK: paypal.orders.OrdersCreateRequest()  
@@ -489,7 +490,8 @@ Shows a confirmation page with all payment details.
 
 # ERRORS
 
-![][image6]  
+<img width="968" height="465" alt="image" src="https://github.com/user-attachments/assets/dc44f263-b96a-4eaf-aabf-3f3440140e70" />
+
 Solution: Change your application’s secret key
 
 # 
