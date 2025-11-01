@@ -213,3 +213,282 @@ npm i
 node app
 ngrok http 3000
 ```
+
+---
+# Stripe
+## Initial Setup of Developer Account
+
+Details to be taken from [Stripe Dashboard](https://dashboard.stripe.com/):  
+
+```env
+STRIPE_SECRET_KEY=sk_**************
+STRIPE_PUBLISHABLE_KEY=pk_****************
+STRIPE_REDIRECT_URI=https://unremissive-unfaithfully-laure.ngrok-free.dev/creator/stripe/callback
+STRIPE_CLIENT_ID=ca_****************
+````
+
+<img width="1212" height="396" alt="Stripe Keys" src="https://github.com/user-attachments/assets/0d582624-f90b-4bd4-909c-a51b5fa04617" />
+
+For client ID, go to [Stripe Connect Settings](https://dashboard.stripe.com/settings/connect) → *onboarding options > oauth*. Store the client id in `.env`, enable OAuth, and set your redirect URI.
+
+<img width="1217" height="507" alt="Stripe Connect Settings" src="https://github.com/user-attachments/assets/251d3de6-e118-4b0c-b28c-16787821a9e7" />
+
+---
+
+## Event Creator Login
+
+### Start OAuth Login
+
+Redirect the creator to Stripe’s OAuth page. Once logged in, Stripe redirects back to your redirect URI.
+
+```js
+exports.startStripeOAuth = (req, res) => {
+  const clientId = process.env.STRIPE_CLIENT_ID;
+  const redirectUri = process.env.STRIPE_REDIRECT_URI;
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: clientId,
+    scope: 'read_write',
+    redirect_uri: redirectUri,
+  });
+  res.redirect(`https://connect.stripe.com/oauth/authorize?${params.toString()}`);
+};
+```
+
+### Handle OAuth Redirect
+
+1. Stripe redirects back to your return URL with a query parameter `code`.
+   Example:
+   `https://unremissive-unfaithfully-laure.ngrok-free.dev/creator/stripe/callback?code=ABC123`
+
+2. Exchange the authorization code for an access token:
+
+```js
+exports.stripeCallback = async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.send('No code received from Stripe');
+
+  try {
+    const response = await stripe.oauth.token({ grant_type: 'authorization_code', code });
+    const stripeUserId = response.stripe_user_id;
+    const accessToken = response.access_token;
+
+    // Retrieve account info
+    const account = await stripe.accounts.retrieve(stripeUserId);
+    let creator = await Creator.findOne({ stripe_account_id: stripeUserId });
+    if (!creator) {
+      creator = new Creator({
+        name: account.display_name || account.business_name,
+        email: account.email || null,
+        stripe_account_id: stripeUserId,
+        stripe_access_token: accessToken,
+      });
+      await creator.save();
+    } else {
+      creator.stripe_access_token = accessToken;
+      await creator.save();
+    }
+
+    req.session.creatorId = creator._id;
+
+    // Redirect to event creation page
+    res.redirect('/creator/create-event');
+
+  } catch (err) {
+    console.error('Stripe OAuth error:', err);
+    res.send('Stripe OAuth error');
+  }
+};
+```
+
+---
+
+## Event Ticketing
+
+### Stripe Client Helper
+
+```js
+const Stripe = require('stripe');
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+```
+
+### Link Stripe to Event Order
+
+```js
+exports.createEvent = async (req, res) => {
+  try {
+    const { name, description, price, currency, paymentMethod } = req.body;
+    const creator = await Creator.findById(req.session.creatorId);
+    if (!creator) return res.send('Creator not found');
+
+    const event = new Event({
+      name,
+      description,
+      price,
+      currency: currency || 'USD',
+      creator: creator._id,
+      paymentMethod: paymentMethod || 'paypal',
+    });
+
+    await event.save();
+
+    console.log("Event created successfully:", {
+      id: event._id,
+      name: event.name,
+      paymentMethod: event.paymentMethod,
+      creator: creator.email || creator._id,
+    });
+
+    res.redirect('/events');
+
+  } catch (error) {
+    console.error("Error creating event:", error);
+    res.status(500).json({ error: error.message });
+  }
+};
+```
+
+---
+
+### Stripe Checkout (Customer Payment)
+
+```js
+exports.createStripeSession = async (req, res) => {
+  try {
+    const { eventId } = req.body;
+    const event = await Event.findById(eventId).populate('creator');
+    if (!event) return res.status(404).send('Event not found');
+    if (!event.creator.stripe_account_id) return res.status(400).send('Creator not connected to Stripe');
+
+    const customerEmail = req.session.userEmail || req.session.creatorEmail || 'no-email@example.com';
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: (event.currency || 'USD').toLowerCase(),
+          product_data: { name: event.name, description: 'socioplace' },
+          unit_amount: Math.round(event.price * 100),
+        },
+        quantity: 1,
+      }],
+      mode: 'payment',
+      payment_intent_data: {
+        transfer_data: {
+          destination: event.creator.stripe_account_id,
+        },
+      },
+      customer_email: customerEmail,
+      success_url: `${req.protocol}://${req.get('host')}/stripe/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${req.protocol}://${req.get('host')}/events`,
+    });
+
+    res.redirect(session.url);
+
+  } catch (err) {
+    console.error('Stripe Session Error:', err.raw || err);
+    res.status(500).send('Stripe session creation error: ' + err.message);
+  }
+};
+```
+
+<img width="1216" height="585" alt="Stripe Checkout 1" src="https://github.com/user-attachments/assets/f8b3d1f4-193f-4b82-a567-c36d34e38158" />
+<img width="1213" height="607" alt="Stripe Checkout 2" src="https://github.com/user-attachments/assets/7ceb4ee3-ad50-450f-982c-c30ec1e7ca54" />
+
+**Properties Table**
+
+| Property                    | Purpose                               |
+| --------------------------- | ------------------------------------- |
+| `payment_method_types`      | Allowed payment methods               |
+| `line_items`                | Defines products/services purchased   |
+| `customer_email`            | Prefill email in checkout             |
+| `currency`                  | Currency for transaction              |
+| `product_data.name`         | Name shown in checkout                |
+| `unit_amount`               | Amount in smallest currency unit      |
+| `quantity`                  | Number of items                       |
+| `mode`                      | Payment type (one-time, subscription) |
+| `transfer_data.destination` | Sends funds to connected account      |
+| `success_url`               | Redirect after successful payment     |
+| `cancel_url`                | Redirect if canceled                  |
+
+---
+
+### Stripe Success Page
+
+```js
+exports.stripeSuccess = async (req, res) => {
+  try {
+    const { session_id } = req.query;
+    const session = await stripe.checkout.sessions.retrieve(session_id);
+    const lineItems = await stripe.checkout.sessions.listLineItems(session_id);
+    const item = lineItems.data[0];
+
+    const payerName = session.customer_details?.name || 'Stripe Customer';
+    const payerEmail = session.customer_details?.email || 'Not provided';
+    const productName = item?.description || 'Event Ticket';
+    const productPrice = (item?.amount_total / 100).toFixed(2);
+    const currency = session.currency?.toUpperCase() || 'USD';
+    const paymentId = session.payment_intent;
+
+    res.render('success', { payerName, payerEmail, productName, productPrice, currency, paymentId });
+
+  } catch (err) {
+    console.error("Stripe success error:", err);
+    res.status(500).send('Error rendering Stripe success page');
+  }
+};
+```
+
+---
+
+### Testing Payments
+
+Use Stripe test card:
+
+```
+Card number: 4242 4242 4242 4242
+Expiry: 12/34
+CVC: 123
+Country: Any
+```
+
+---
+
+## Codebase Setup
+
+```bash
+npm i
+node app
+ngrok http 3000
+```
+
+[GitHub Repo](https://github.com/anisha1dev/Paypal)
+
+---
+
+## Notes
+
+Only card payment enabled.
+[Stripe Payment Methods](https://dashboard.stripe.com/settings/payment_methods/)
+
+<img width="1212" height="602" alt="Stripe Payment Methods" src="https://github.com/user-attachments/assets/a0fde1e5-7017-42f1-b5a4-04575b5e6b3a" />
+
+---
+
+### Maximum Amount
+
+* UK: Max 10 manual payouts/day, £1,000,000 each
+* US: Max 10 manual payouts/day, $1,000,000 each
+  [Stripe Manual Payouts](https://docs.stripe.com/payouts#manual-payouts)
+
+### Minimum Amount
+
+* See [Stripe Minimum Payout Amounts](https://docs.stripe.com/payouts#minimum-payout-amounts-table)
+
+<img width="1222" height="582" alt="Minimum Payouts" src="https://github.com/user-attachments/assets/a46bb1d1-8f2d-41f6-bcad-d8534ee738ec" />
+
+### Currency Support
+
+[Stripe Presentment Currencies](https://docs.stripe.com/currencies#presentment-currencies)
+
+```
