@@ -1,7 +1,7 @@
 # PayPal + Stripe Integration
 
 ---
-
+# PayPal
 ## 1. Initial Setup of Developer Account
 
 1. Login to [PayPal Developer Dashboard](https://developer.paypal.com/dashboard/)
