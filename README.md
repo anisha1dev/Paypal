@@ -1,4 +1,4 @@
-# PayPal Integration
+# PayPal + Stripe Integration
 
 ---
 
